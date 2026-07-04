@@ -1,0 +1,68 @@
+#!/usr/bin/env node
+'use strict';
+
+// kek-gen: generate a vault embedding key (KEK) JWK file.
+//
+// Usage: kek-gen [-a <alg>] [-k <kid>] <file>
+//   alg: P-521 (default) | P-384 | P-256 | RSA-OAEP | RSA-OAEP-256
+//        | A128GCMKW | A192GCMKW | A256GCMKW | A128KW | A192KW | A256KW
+//
+// Writes the private/secret JWK to <file> with mode 0600 (never
+// overwrites). Asymmetric KEKs are preferred (SPEC.md §5).
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+
+const Optist = require('optist');
+
+const opt = ((new Optist())
+			 .opts([
+				 { shortName: 'a', longName: 'algorithm',
+				   description: 'KEK algorithm: P-521 (default) | P-384 | P-256 | RSA-OAEP | RSA-OAEP-256 | A{128,192,256}GCMKW | A{128,192,256}KW',
+				   hasArg: true,
+				   defaultValue: 'P-521' },
+				 { shortName: 'k', longName: 'kid',
+				   description: 'Key id (default: a random UUID)',
+				   hasArg: true },
+				 { longName: 'rsa-modulus-length',
+				   description: 'RSA modulus length in bits (default 4096)',
+				   hasArg: true,
+				   optArgCb: function(s) {
+					   const n = Number.parseInt(s, 10);
+					   return ((Number.isSafeInteger(n) && (n >= 2048) && (n <= 16384)) ? n : undefined);
+				   } }
+			 ])
+			 .help('kek-gen')
+			 .parse(undefined, 1, 1));
+
+const alg = opt.value('algorithm');
+const kid = opt.value('kid') || crypto.randomUUID();
+const file = opt.rest()[0];
+
+let jwk;
+if ([ 'P-256', 'P-384', 'P-521' ].includes(alg)) {
+	const namedCurve = ({ 'P-256': 'prime256v1', 'P-384': 'secp384r1', 'P-521': 'secp521r1' })[alg];
+	jwk = crypto.generateKeyPairSync('ec', { namedCurve }).privateKey.export({ format: 'jwk' });
+	delete jwk.key_ops;
+	jwk.kid = kid;
+} else if ([ 'RSA-OAEP', 'RSA-OAEP-256' ].includes(alg)) {
+	const modulusLength = opt.value('rsa-modulus-length') || 4096;
+	jwk = crypto.generateKeyPairSync('rsa', { modulusLength }).privateKey.export({ format: 'jwk' });
+	delete jwk.key_ops;
+	jwk.alg = alg;
+	jwk.kid = kid;
+} else if (/^A(128|192|256)(GCMKW|KW)$/.test(alg)) {
+	const bits = Number.parseInt(/^A(\d+)/.exec(alg)[1]);
+	jwk = { kty: 'oct', k: crypto.randomBytes(bits / 8).toString('base64url'), alg, kid };
+} else {
+	console.error(`kek-gen: unsupported algorithm ${alg}`);
+	process.exit(1);
+}
+
+try {
+	fs.writeFileSync(file, JSON.stringify(jwk, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+} catch (e) {
+	console.error(`kek-gen: cannot write ${file}: ${e.message}`);
+	process.exit(1);
+}
+console.log(`${file}: ${alg} embedding key written (kid ${kid})`);

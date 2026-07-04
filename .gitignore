@@ -1,0 +1,11 @@
+node_modules/
+
+# Internal working / design documents — not published. Everything an
+# external user needs lives in README.md and API.md.
+SPEC.md
+IMPLEMENTATION-PLAN.md
+OPEN-QUESTIONS.md
+FUTURE-NOTES.md
+
+dc/volumes/
+dc/*.env

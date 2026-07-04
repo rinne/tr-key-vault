@@ -1,0 +1,29 @@
+{
+  "name": "tr-key-vault",
+  "version": "0.1.0",
+  "description": "PostgreSQL backed key vault server for JWT/JWE/JWK operations",
+  "main": "index.js",
+  "bin": {
+    "tr-key-vault": "./tr-key-vault",
+    "kv-admin": "./kv-admin",
+    "kek-gen": "./kek-gen"
+  },
+  "scripts": {
+    "start": "node ./tr-key-vault",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "author": "Timo J. Rinne <tri@iki.fi>",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "optist": "^2.0.1",
+    "pg": "^8.11.0",
+    "pg-pool": "^3.9.1",
+    "tr-json-chain": "^1.0.2",
+    "tr-jwe": "^1.1.0",
+    "tr-jwt": "^1.1.0"
+  }
+}

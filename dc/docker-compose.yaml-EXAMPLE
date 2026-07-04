@@ -1,0 +1,68 @@
+# tr-key-vault model deployment (SPEC.md §14).
+#
+# Copy to docker-compose.yaml, copy the *.env-EXAMPLE files to *.env
+# and edit them, put the KEK JWK file(s) into ./volumes/kv-vault/keys/
+# (mode 0600, generate with ../kek-gen), replace the example domain,
+# then:
+#
+#   docker compose -f dc/docker-compose.yaml up --build
+#
+# docker-compose.yaml and *.env are gitignored: they carry
+# deployment-specific values and secrets.
+
+networks:
+  kv-net:
+    driver: bridge
+
+services:
+
+  kv-postgres:
+    image: postgres:18
+    container_name: kv-postgres
+    restart: unless-stopped
+    expose:
+      - "5432"
+    env_file:
+      - ./kv-postgres.env
+    environment:
+      PGDATA: '/var/lib/postgresql/data/pgdata'
+    volumes:
+      - ./volumes/kv-postgres/data:/var/lib/postgresql/data:rw,Z
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro,Z
+    networks:
+      - kv-net
+
+  kv-vault:
+    image: "kv-vault:latest"
+    build:
+      context: ..
+      dockerfile: ./Dockerfile
+    container_name: kv-vault
+    restart: unless-stopped
+    expose:
+      - "8888"
+    env_file:
+      - ./kv.env
+    volumes:
+      - ./volumes/kv-vault/keys:/keys:ro,Z
+    networks:
+      - kv-net
+    depends_on:
+      - kv-postgres
+
+  kv-proxy:
+    image: "timorinne/nginx-auto-tls-proxy:0.8.0"
+    container_name: kv-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      LETSENCRYPT_EMAIL: "certificate-admin@example.com"
+      PROXY_SITES: "vault.example.com:http://kv-vault:8888/"
+    volumes:
+      - ./volumes/kv-proxy/ssl:/ssl:rw,Z
+    networks:
+      - kv-net
+    depends_on:
+      - kv-vault
