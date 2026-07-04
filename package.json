@@ -1,13 +1,12 @@
 {
   "name": "tr-key-vault",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "PostgreSQL backed key vault server for JWT/JWE/JWK operations",
   "main": "index.js",
   "bin": {
     "tr-key-vault": "./tr-key-vault",
     "kv-admin": "./kv-admin",
-    "kek-gen": "./kek-gen",
-    "kv-client": "./kv-client"
+    "kek-gen": "./kek-gen"
   },
   "scripts": {
     "start": "node ./tr-key-vault",

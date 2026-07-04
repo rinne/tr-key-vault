@@ -10,8 +10,8 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY basicutils.js acl.js audit.js clientip.js dbinit.js dbmigrate.js dbopts.js \
      errors.js index.js ipmatch.js keygen.js kek.js keystore.js kvadmin.js \
-     kvclient.js server.js serverauth.js serverdb.js serverhandlers.js serveropts.js ./
-COPY tr-key-vault kv-admin kek-gen kv-client ./
+     server.js serverauth.js serverdb.js serverhandlers.js serveropts.js ./
+COPY tr-key-vault kv-admin kek-gen ./
 COPY migrations ./migrations
 
 USER docknode
