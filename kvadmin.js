@@ -307,7 +307,9 @@ module.exports = async function() {
 							  (u.authToken ? 'api-enabled' : 'api-disabled'),
 							  `nbf=${d.nbf ?? '-'}`,
 							  `exp=${d.exp ?? '-'}`,
-							  `allowedIP=${JSON.stringify(d.allowedIP ?? null)}` ].join(' '));
+							  `allowedIP=${JSON.stringify(d.allowedIP ?? null)}`,
+							  `allowedOps=${JSON.stringify(d.allowedOps ?? null)}`,
+							  `coOwners=${JSON.stringify(d.coOwners ?? null)}` ].join(' '));
 			}
 		},
 

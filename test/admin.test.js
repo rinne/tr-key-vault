@@ -146,9 +146,15 @@ test('kv-admin: allowedOps provisioning', async function() {
 test('kv-admin: coOwners provisioning', async function() {
 	const a = crypto.randomUUID();
 	const b = crypto.randomUUID();
-	const userId = (await admin([ 'add-user', '--allow-all',
+	const userId = (await admin([ 'add-user', '--allow-all', '--allowed-ops', 'encrypt',
 								  '--co-owner', a, '--co-owner', b ])).stdout.trim();
 	assert.deepEqual((await db.userById(userId)).data.coOwners.sort(), [ a, b ].sort());
+	// list-users prints allowedOps and coOwners.
+	const ls = (await admin([ 'list-users' ])).stdout;
+	const line = ls.split('\n').find(function(l) { return l.startsWith(userId); });
+	assert.match(line, /allowedOps=\["encrypt"\]/);
+	assert.ok(line.includes(a) && line.includes(b), 'coOwners listed');
+	assert.match(line, /coOwners=\[/);
 	// set-user-data replaces the list.
 	await admin([ 'set-user-data', '--user', userId, '--co-owner', a ]);
 	assert.deepEqual((await db.userById(userId)).data.coOwners, [ a ]);
