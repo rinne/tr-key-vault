@@ -613,3 +613,46 @@ test('allowedOps: list-keys shows only keys with an effective key class', async 
 	const listed2 = assertOk(await vault.call('list-keys', {}, u2));
 	assert.ok(listed2.keys.some(function(k) { return k.kid === kid2; }));
 });
+
+test('coOwners: auto-added as owners when the request has no explicit acl', async function() {
+	const co1 = await vault.createUser();
+	const co2 = await vault.createUser();
+	const creator = await vault.createUser({ coOwners: [ co1.userId, co2.userId ] });
+	const gen = assertOk(await vault.call('generate-key', { alg: 'A256GCMKW' }, creator));
+	const row = await vault.db.keyById(gen.kid);
+	assert.deepEqual(row.acl[creator.userId], [ 'owner' ]);
+	assert.deepEqual(row.acl[co1.userId], [ 'owner' ]);
+	assert.deepEqual(row.acl[co2.userId], [ 'owner' ]);
+	// Each co-owner really is an owner: co1 can revoke the key.
+	assertOk(await vault.call('revoke-key', { kid: gen.kid }, co1));
+});
+
+test('coOwners: filtered to syntactic UUIDs and existing users', async function() {
+	const co1 = await vault.createUser();
+	const creator = await vault.createUser({
+		coOwners: [ co1.userId, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', 'not-a-uuid', co1.userId ]
+	});
+	const gen = assertOk(await vault.call('generate-key', { alg: 'A256GCM' }, creator));
+	const row = await vault.db.keyById(gen.kid);
+	// Only the creator and the one existing co-owner; the non-existent
+	// UUID and the malformed entry are dropped, the dup collapsed.
+	assert.deepEqual(Object.keys(row.acl).sort(), [ creator.userId, co1.userId ].sort());
+	assert.deepEqual(row.acl[co1.userId], [ 'owner' ]);
+});
+
+test('coOwners: not applied when the request carries an explicit acl', async function() {
+	const co1 = await vault.createUser();
+	const other = await vault.createUser();
+	const creator = await vault.createUser({ coOwners: [ co1.userId ] });
+	// Explicit (non-empty) acl: co-owners suppressed.
+	const g1 = assertOk(await vault.call('generate-key',
+		{ alg: 'A256GCMKW', acl: { [other.userId]: [ 'decrypt' ] } }, creator));
+	const r1 = await vault.db.keyById(g1.kid);
+	assert.deepEqual(r1.acl[creator.userId], [ 'owner' ]);
+	assert.deepEqual(r1.acl[other.userId], [ 'decrypt' ]);
+	assert.equal(r1.acl[co1.userId], undefined);
+	// Even an explicit *empty* acl suppresses co-owners (creator stays owner).
+	const g2 = assertOk(await vault.call('generate-key', { alg: 'A256GCM', acl: {} }, creator));
+	const r2 = await vault.db.keyById(g2.kid);
+	assert.deepEqual(Object.keys(r2.acl), [ creator.userId ]);
+});

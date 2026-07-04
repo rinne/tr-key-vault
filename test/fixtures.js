@@ -119,6 +119,7 @@ async function startVault(pg, options) {
 		if (o.nbf !== undefined) { data.nbf = o.nbf; }
 		if (o.exp !== undefined) { data.exp = o.exp; }
 		if (o.allowedOps !== undefined) { data.allowedOps = o.allowedOps; }
+		if (o.coOwners !== undefined) { data.coOwners = o.coOwners; }
 		const userId = await db.insertUser(data);
 		const token = crypto.randomUUID();
 		await db.setUserToken(userId, tokenHash(token));

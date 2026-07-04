@@ -219,12 +219,13 @@ the database (there is no HTTP admin API):
 kv-admin <command> [options]
 
 add-user       --allow-all | --allowed-ip <entry> ... [--nbf ts] [--exp ts]
-               [--allowed-ops <class> ...]
+               [--allowed-ops <class> ...] [--co-owner <uuid> ...]
 set-token      --user <uuid>          # prints the bearer token once
 revoke-token   --user <uuid>
 set-user-data  --user <uuid> [--allow-all | --allowed-ip <entry> ...]
                [--nbf ts | --clear-nbf] [--exp ts | --clear-exp]
                [--allowed-ops <class> ... | --clear-allowed-ops]
+               [--co-owner <uuid> ... | --clear-co-owners]
 remove-user    --user <uuid>
 list-users
 update-acl     --kid <uuid> --acl '<json-acl-object>'
@@ -246,6 +247,12 @@ explicit `["0.0.0.0/0", "0::/0"]`.
 seven ACL classes (not `owner`) plus `generate-key` and `list-keys`.
 `--allowed-ops none` sets the explicit empty (deny-all) mask;
 `--clear-allowed-ops` removes the mask (back to unrestricted).
+
+`--co-owner` (repeatable) sets the user's `coOwners` list: user UUIDs
+auto-added as `owner` to keys the user creates **without** an explicit
+ACL (see [Authorization](#authorization-and-existence-masking)).
+`--clear-co-owners` removes the list. Entries are validated as UUIDs;
+whether each still exists is checked at key-generation time.
 
 ## Vault embedding keys (KEKs)
 
@@ -324,6 +331,16 @@ create escrow keys and encrypt to them but — even as the key's owner —
 can never `decrypt` or `export-key` the secret; a *different* vault
 user, assigned in the key's ACL at generation, does the reading.
 
+**Co-owners (`coOwners`).** A user may carry an optional `coOwners`
+array of user UUIDs in `vault_user.data`. When that user generates a
+key **without** an explicit `acl` in the request, every listed
+co-owner is added to the key's ACL as `owner` — a convenience so remote
+callers get shared ownership without composing an ACL each time.
+Co-owners are filtered to syntactic UUIDs and to currently-existing
+users (unknown or deleted ids are silently dropped). Supplying an
+explicit `acl` (even an empty `{}`) suppresses `coOwners` and uses the
+submitted ACL verbatim (still auto-merging the caller as owner).
+
 **Existence masking**: a key that does not exist, a key the caller has
 no *effective* class on (ACL ∩ `allowedOps`), and a key outside its
 validity window all return exactly the same `1101 Key not found` — an
@@ -398,8 +415,9 @@ bearer token; only its sha256 digest is stored, so a database leak
 reveals no usable credentials, and the token itself is shown exactly
 once at issue. `allowedIP` and the optional account-validity
 `nbf`/`exp` gate every request (see Authentication and the data model
-above), and the optional `allowedOps` mask caps the user's
-capabilities (see [Authorization](#authorization-and-existence-masking)).
+above), the optional `allowedOps` mask caps the user's capabilities,
+and the optional `coOwners` list grants shared ownership of keys the
+user creates (see [Authorization](#authorization-and-existence-masking)).
 
 ## tr-data-escrow integration
 

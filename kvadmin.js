@@ -85,6 +85,13 @@ module.exports = async function() {
 						 multi: true },
 					   { longName: 'clear-allowed-ops',
 						 description: 'Remove the allowedOps mask (return the user to unrestricted); set-user-data only' },
+					   { longName: 'co-owner',
+						 description: 'coOwner user id (UUID) auto-added as owner to keys this user creates without an explicit ACL; repeatable',
+						 hasArg: true,
+						 multi: true,
+						 optArgCb: uuidCb },
+					   { longName: 'clear-co-owners',
+						 description: 'Remove the coOwners list; set-user-data only' },
 					   { longName: 'nbf',
 						 description: 'Account not-before as a unix timestamp',
 						 hasArg: true,
@@ -156,6 +163,18 @@ module.exports = async function() {
 		return validateAllowedOps(list);
 	}
 
+	// coOwners list from --co-owner (each validated as a UUID by the
+	// option callback). Returns undefined when not specified. Existence
+	// of the referenced users is checked at key-generation time, not
+	// here (weak links).
+	function coOwnersFromOpts() {
+		const list = ctx.opt.value('co-owner');
+		if (list.length === 0) {
+			return undefined;
+		}
+		return Array.from(new Set(list));
+	}
+
 	const commands = {
 
 		'add-user': async function() {
@@ -175,8 +194,12 @@ module.exports = async function() {
 			if (allowedOps !== undefined) {
 				data.allowedOps = allowedOps;
 			}
+			const coOwners = coOwnersFromOpts();
+			if (coOwners !== undefined) {
+				data.coOwners = coOwners;
+			}
 			const userId = await ctx.db.insertUser(data);
-			await ctx.audit.event('admin:add-user', { actor, userId, allowedIP, allowedOps });
+			await ctx.audit.event('admin:add-user', { actor, userId, allowedIP, allowedOps, coOwners });
 			console.log(userId);
 		},
 
@@ -248,10 +271,20 @@ module.exports = async function() {
 			} else if (allowedOps !== undefined) {
 				data.allowedOps = allowedOps;
 			}
+			const coOwners = coOwnersFromOpts();
+			if (ctx.opt.value('clear-co-owners')) {
+				if (coOwners !== undefined) {
+					throw new Error('--clear-co-owners conflicts with --co-owner');
+				}
+				delete data.coOwners;
+			} else if (coOwners !== undefined) {
+				data.coOwners = coOwners;
+			}
 			await ctx.db.setUserData(userId, data);
 			await ctx.audit.event('admin:set-user-data', { actor, userId,
 														   allowedIP: data.allowedIP,
 														   allowedOps: data.allowedOps,
+														   coOwners: data.coOwners,
 														   nbf: data.nbf, exp: data.exp });
 			log(`user data updated for ${userId}`);
 		},

@@ -143,6 +143,29 @@ test('kv-admin: allowedOps provisioning', async function() {
 	await admin([ 'remove-user', '--user', userId ]);
 });
 
+test('kv-admin: coOwners provisioning', async function() {
+	const a = crypto.randomUUID();
+	const b = crypto.randomUUID();
+	const userId = (await admin([ 'add-user', '--allow-all',
+								  '--co-owner', a, '--co-owner', b ])).stdout.trim();
+	assert.deepEqual((await db.userById(userId)).data.coOwners.sort(), [ a, b ].sort());
+	// set-user-data replaces the list.
+	await admin([ 'set-user-data', '--user', userId, '--co-owner', a ]);
+	assert.deepEqual((await db.userById(userId)).data.coOwners, [ a ]);
+	// clear removes it.
+	await admin([ 'set-user-data', '--user', userId, '--clear-co-owners' ]);
+	assert.equal((await db.userById(userId)).data.coOwners, undefined);
+	// non-UUID co-owner rejected.
+	const bad = await admin([ 'set-user-data', '--user', userId, '--co-owner', 'not-a-uuid' ],
+							{ allowFailure: true });
+	assert.notEqual(bad.code, 0);
+	// --co-owner and --clear-co-owners conflict.
+	const conflict = await admin([ 'set-user-data', '--user', userId,
+								   '--co-owner', a, '--clear-co-owners' ], { allowFailure: true });
+	assert.notEqual(conflict.code, 0);
+	await admin([ 'remove-user', '--user', userId ]);
+});
+
 test('kv-admin: update-acl', async function() {
 	const owner = (await admin([ 'add-user', '--allow-all' ])).stdout.trim();
 	const other = (await admin([ 'add-user', '--allow-all' ])).stdout.trim();

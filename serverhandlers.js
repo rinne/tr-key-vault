@@ -154,36 +154,58 @@ function serverHandlers(ctx) {
 				throw new ApiError(ERR.INVALID_REQUEST_DATA,
 								   'returnPublicKey is only applicable to asymmetric keys');
 			}
-			// The caller is automatically added to the ACL as owner
-			// (merged with any submitted entry for the caller).
+			const self = user.userId.toLowerCase();
 			let acl;
-			try {
-				const merged = {};
-				if (data.acl !== undefined) {
+			if (data.acl !== undefined) {
+				// Explicit ACL in the request: the caller controls it (and
+				// is auto-merged as owner); the user's coOwners are NOT
+				// applied.
+				try {
+					const merged = {};
 					if (! isPlainObject(data.acl)) {
 						throw new Error('ACL must be an object');
 					}
 					Object.assign(merged, data.acl);
+					const selfKey = Object.keys(merged).find(function(u) {
+						return (String(u).toLowerCase() === self);
+					});
+					const selfOps = (selfKey !== undefined) ? merged[selfKey] : [];
+					if (selfKey !== undefined) {
+						delete merged[selfKey];
+					}
+					if (! Array.isArray(selfOps)) {
+						throw new Error('ACL ops must be an array');
+					}
+					merged[self] = selfOps.concat(selfOps.includes('owner') ? [] : [ 'owner' ]);
+					acl = validateAcl(merged);
+				} catch (e) {
+					throw new ApiError(ERR.INVALID_ACL, e.message);
 				}
-				const self = user.userId.toLowerCase();
-				const selfKey = Object.keys(merged).find(function(u) {
-					return (String(u).toLowerCase() === self);
-				});
-				const selfOps = (selfKey !== undefined) ? merged[selfKey] : [];
-				if (selfKey !== undefined) {
-					delete merged[selfKey];
+				const missing = await ctx.db.missingUsers(Object.keys(acl));
+				if (missing.length > 0) {
+					throw new ApiError(ERR.INVALID_ACL, 'Unknown ACL user');
 				}
-				if (! Array.isArray(selfOps)) {
-					throw new Error('ACL ops must be an array');
+			} else {
+				// No explicit ACL in the request: the caller is owner, plus
+				// every VALID co-owner from the user's data.coOwners —
+				// filtered to syntactic UUIDs and existing users (SPEC.md
+				// §9.2). Invalid or since-deleted co-owners are dropped.
+				const rawCo = Array.isArray(user.data && user.data.coOwners)
+					? user.data.coOwners : [];
+				const candidates = Array.from(new Set(
+					rawCo.filter(isUuid).map(function(u) { return u.toLowerCase(); })
+				)).filter(function(u) { return u !== self; });
+				let coOwners = [];
+				if (candidates.length > 0) {
+					const missing = new Set(await ctx.db.missingUsers(candidates));
+					coOwners = candidates.filter(function(u) { return ! missing.has(u); });
 				}
-				merged[self] = selfOps.concat(selfOps.includes('owner') ? [] : [ 'owner' ]);
-				acl = validateAcl(merged);
-			} catch (e) {
-				throw new ApiError(ERR.INVALID_ACL, e.message);
-			}
-			const missing = await ctx.db.missingUsers(Object.keys(acl));
-			if (missing.length > 0) {
-				throw new ApiError(ERR.INVALID_ACL, 'Unknown ACL user');
+				const aclObj = {};
+				aclObj[self] = [ 'owner' ];
+				for (const u of coOwners) {
+					aclObj[u] = [ 'owner' ];
+				}
+				acl = validateAcl(aclObj);
 			}
 			const generated = await ctx.keystore.generate(spec, acl, { nbf: data.nbf, exp: data.exp });
 			const rv = { kid: generated.kid };

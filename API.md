@@ -151,6 +151,12 @@ Authenticated liveness with process uptime.
 Generate a key (or key pair) into the vault. The caller is
 automatically merged into the ACL as `owner`.
 
+When the request has **no `acl` property at all**, the caller's
+`data.coOwners` (if any) are also added to the ACL as `owner`, filtered
+to syntactic UUIDs and to currently-existing users (unknown/deleted ids
+are silently dropped). Supplying an `acl` (even `{}`) suppresses
+`coOwners` and uses the submitted ACL verbatim.
+
 Request `data`:
 
 ```jsonc
