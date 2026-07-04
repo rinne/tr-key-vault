@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+'use strict';
+
+require('./kvclient')().catch(function(e) {
+	console.error(e?.message ?? e);
+	process.exit(1);
+});

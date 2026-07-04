@@ -34,13 +34,13 @@ of the vault, `postgres:18`, and
 [`timorinne/nginx-auto-tls-proxy`](https://hub.docker.com/r/timorinne/nginx-auto-tls-proxy).
 
 ```
-                     ┌──────────────────────────────────┐
-   https             │  tr-key-vault (node builtin http) │
-client ─► kv-proxy ─►│  auth ─► ACL ─► keystore ─► token │─► PostgreSQL
-        (TLS, nginx- │            │      (KEK embed/       │   vault_user
-         auto-tls-   │            │       extract, cache)  │   vault_key
+                     ┌──────────────────────────────────────┐
+   https             │  tr-key-vault (node builtin http)    │
+client ─► kv-proxy ─►│  auth ─► ACL ─► keystore ─► token    │─► PostgreSQL
+        (TLS, nginx- │            │      (KEK embed/        │   vault_user
+         auto-tls-   │            │       extract, cache)   │   vault_key
          proxy)      │            └─► audit (tr-json-chain) │   kv_event_*
-                     └──────────────────────────────────┘
+                     └──────────────────────────────────────┘
                           ▲ KEK JWK file(s), 0600, volume-mounted
 
   kv-admin CLI (same image, docker exec) ─► PostgreSQL + audit chain
@@ -396,6 +396,49 @@ As that backend the vault is used like this:
   during recovery. `export-key` is the (normally disabled) escape
   hatch.
 
+## kv-client
+
+`kv-client` is a thin command-line HTTP client for the API — a
+convenience for operators and, mainly, for exercising the vault during
+testing. It builds the request envelope, sends it, and prints the
+response; it does no cryptography and no database access. It ships in
+the image (`docker exec kv-vault node ./kv-client …`) and is runnable
+from a checkout or install (`./kv-client …`, `npx kv-client …`).
+
+```
+kv-client [global-options] <command> [command-options] [args]
+```
+
+Connection and credentials come from options or `KV_CLIENT_OPT_*`
+environment variables: `--url` (the vault base URL), `--user`,
+`--token` / `--token-file`. Commands mirror the API: `healthcheck`,
+`generate-key`, `public-key`, `create-jwt`, `verify-jwt`, `create-jwe`,
+`decrypt-jwe`, `revoke-key`, `export-key`, `list-keys`, the
+unauthenticated `healthz` / `readyz` probes, and `raw <request>` for
+sending an arbitrary request (negative testing). Payloads are given
+with `--data <json>` / `--data-file <path>` / `--data -` (stdin); the
+token for `verify-jwt` / `decrypt-jwe` is a positional argument or
+stdin.
+
+Output is pretty-printed JSON by default (`--compact-json` for a single
+line, `--raw` for the whole envelope, `--field <name>` for one field —
+a scalar bare, an object as JSON), so operations chain in a pipeline:
+
+```sh
+export KV_CLIENT_OPT_URL=https://vault.example.com
+export KV_CLIENT_OPT_USER=<user-id>
+export KV_CLIENT_OPT_TOKEN=<token>
+
+kid=$(kv-client generate-key --alg HS256 --field kid)
+kv-client create-jwt --kid "$kid" --data '{"sub":"demo"}' --field token \
+  | kv-client verify-jwt --kid "$kid" -
+```
+
+Exit codes: `0` success, `1` local/usage error, `2` transport error
+(couldn't reach the vault), `3` API operation error (the vault returned
+`status: "error"`). `--insecure`/`-k` and `--ca-file` handle a
+self-signed proxy in test setups.
+
 ## Development
 
 ```sh
@@ -407,9 +450,10 @@ npm test        # node --test; spins up throwaway PostgreSQL clusters
 The suite covers the unit level (ACL, IP matching, key generation
 matrix, KEK embed/extract, unwrap cache), the database layer, the
 full HTTP API (auth, masking, every operation, audit coupling, KEK
-rotation, proxy-hop spoof resistance) and the real binaries end to
-end (boot via environment config, kv-admin, sealed audit chain,
-clean shutdown).
+rotation, proxy-hop spoof resistance), the `kv-client` binary against
+a live vault (every command, output modes, exit-code classes,
+pipelines), and the real binaries end to end (boot via environment
+config, kv-admin, sealed audit chain, clean shutdown).
 
 Style: plain JavaScript, CommonJS, `'use strict'`, tabs, flat file
 layout, `ctx`-object pattern. See `CLAUDE.md`.
