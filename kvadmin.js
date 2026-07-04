@@ -23,7 +23,7 @@ module.exports = async function() {
 
 	const { log } = require('./basicutils');
 	const { isUuid, isPlainObject } = require('./basicutils');
-	const { validateAcl } = require('./acl');
+	const { validateAcl, validateAllowedOps, ALLOWED_OPS_CLASSES } = require('./acl');
 	const { validateAllowedIP } = require('./ipmatch');
 	const { tokenHash } = require('./serverauth');
 	const { kekInit } = require('./kek');
@@ -79,6 +79,12 @@ module.exports = async function() {
 						 multi: true },
 					   { longName: 'allow-all',
 						 description: 'Set allowedIP to the explicit allow-all [ 0.0.0.0/0, 0::/0 ]' },
+					   { longName: 'allowed-ops',
+						 description: 'allowedOps capability-mask entry (' + ALLOWED_OPS_CLASSES.join('|') + '); repeatable. An empty mask disables everything',
+						 hasArg: true,
+						 multi: true },
+					   { longName: 'clear-allowed-ops',
+						 description: 'Remove the allowedOps mask (return the user to unrestricted); set-user-data only' },
 					   { longName: 'nbf',
 						 description: 'Account not-before as a unix timestamp',
 						 hasArg: true,
@@ -136,6 +142,20 @@ module.exports = async function() {
 		return list;
 	}
 
+	// allowedOps mask from --allowed-ops. Returns undefined when not
+	// specified (leave/set no mask = unrestricted), [] for the explicit
+	// deny-all sentinel `--allowed-ops=none`, else the validated mask.
+	function allowedOpsFromOpts() {
+		const list = ctx.opt.value('allowed-ops');
+		if (list.length === 0) {
+			return undefined;
+		}
+		if ((list.length === 1) && (list[0].toLowerCase() === 'none')) {
+			return [];
+		}
+		return validateAllowedOps(list);
+	}
+
 	const commands = {
 
 		'add-user': async function() {
@@ -151,8 +171,12 @@ module.exports = async function() {
 			if (ctx.opt.value('exp')) {
 				data.exp = ctx.opt.value('exp');
 			}
+			const allowedOps = allowedOpsFromOpts();
+			if (allowedOps !== undefined) {
+				data.allowedOps = allowedOps;
+			}
 			const userId = await ctx.db.insertUser(data);
-			await ctx.audit.event('admin:add-user', { actor, userId, allowedIP });
+			await ctx.audit.event('admin:add-user', { actor, userId, allowedIP, allowedOps });
 			console.log(userId);
 		},
 
@@ -215,9 +239,19 @@ module.exports = async function() {
 				}
 				delete data.exp;
 			}
+			const allowedOps = allowedOpsFromOpts();
+			if (ctx.opt.value('clear-allowed-ops')) {
+				if (allowedOps !== undefined) {
+					throw new Error('--clear-allowed-ops conflicts with --allowed-ops');
+				}
+				delete data.allowedOps;
+			} else if (allowedOps !== undefined) {
+				data.allowedOps = allowedOps;
+			}
 			await ctx.db.setUserData(userId, data);
 			await ctx.audit.event('admin:set-user-data', { actor, userId,
 														   allowedIP: data.allowedIP,
+														   allowedOps: data.allowedOps,
 														   nbf: data.nbf, exp: data.exp });
 			log(`user data updated for ${userId}`);
 		},

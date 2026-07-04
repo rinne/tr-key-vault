@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 
 const { ipAllowed, validateAllowedIP, parseIPv4, parseIPv6 } = require('../ipmatch');
 const { deriveClientIp } = require('../clientip');
-const { OP_CLASSES, validateAcl, aclAllows, aclAny } = require('../acl');
+const { OP_CLASSES, ALLOWED_OPS_CLASSES, validateAcl, validateAllowedOps,
+		aclAllows, aclAny, allowedOpsAllows, effectiveAny } = require('../acl');
 const { resolveKeyGenParams, KEYGEN_ALGS } = require('../keygen');
 const { isUuid, isPlainObject } = require('../basicutils');
 
@@ -103,6 +104,57 @@ test('acl: aclAllows owner implication', function() {
 	assert.equal(aclAny(acl, u2), true);
 	assert.equal(aclAny({ [u2]: [] }, u2), false);
 	assert.equal(aclAny(acl, '33333333-3333-3333-3333-333333333333'), false);
+});
+
+test('acl: validateAllowedOps', function() {
+	// The alphabet is the 7 key classes + two pseudo-classes, not owner.
+	assert.ok(! ALLOWED_OPS_CLASSES.includes('owner'));
+	for (const c of [ 'encrypt', 'decrypt', 'sign', 'verify', 'export-public-key',
+					  'export-secret-key', 'revoke-key', 'generate-key', 'list-keys' ]) {
+		assert.ok(ALLOWED_OPS_CLASSES.includes(c), c);
+	}
+	assert.deepEqual(validateAllowedOps([ 'encrypt', 'encrypt', 'list-keys' ]),
+					 [ 'encrypt', 'list-keys' ]);
+	assert.deepEqual(validateAllowedOps([]), []);
+	assert.throws(function() { validateAllowedOps([ 'owner' ]); }, /Unknown allowedOps class/);
+	assert.throws(function() { validateAllowedOps([ 'sudo' ]); }, /Unknown allowedOps class/);
+	assert.throws(function() { validateAllowedOps('encrypt'); }, /must be an array/);
+});
+
+test('acl: allowedOpsAllows — absent unrestricted, empty deny-all', function() {
+	// Absent property => unrestricted.
+	assert.equal(allowedOpsAllows({ allowedIP: [] }, 'decrypt'), true);
+	assert.equal(allowedOpsAllows({}, 'generate-key'), true);
+	// Present mask => membership.
+	const u = { allowedOps: [ 'encrypt', 'export-public-key', 'generate-key' ] };
+	assert.equal(allowedOpsAllows(u, 'encrypt'), true);
+	assert.equal(allowedOpsAllows(u, 'export-public-key'), true);
+	assert.equal(allowedOpsAllows(u, 'generate-key'), true);
+	assert.equal(allowedOpsAllows(u, 'decrypt'), false);
+	assert.equal(allowedOpsAllows(u, 'export-secret-key'), false);
+	assert.equal(allowedOpsAllows(u, 'list-keys'), false);
+	// Empty array => deny everything.
+	assert.equal(allowedOpsAllows({ allowedOps: [] }, 'encrypt'), false);
+	assert.equal(allowedOpsAllows({ allowedOps: [] }, 'generate-key'), false);
+	// Malformed present value fails closed.
+	assert.equal(allowedOpsAllows({ allowedOps: 'encrypt' }, 'encrypt'), false);
+});
+
+test('acl: effectiveAny — ACL grant intersected with allowedOps', function() {
+	const u1 = '11111111-1111-4111-8111-111111111111';
+	const acl = { [u1]: [ 'owner' ] };
+	// Owner + unrestricted => has effective classes.
+	assert.equal(effectiveAny({}, acl, u1), true);
+	// Owner but allowedOps only encrypt => still effective (encrypt).
+	assert.equal(effectiveAny({ allowedOps: [ 'encrypt' ] }, acl, u1), true);
+	// Owner but allowedOps only the pseudo-classes => no effective *key* class.
+	assert.equal(effectiveAny({ allowedOps: [ 'list-keys', 'generate-key' ] }, acl, u1), false);
+	// Empty mask => nothing.
+	assert.equal(effectiveAny({ allowedOps: [] }, acl, u1), false);
+	// Non-owner with decrypt granted, but allowedOps excludes decrypt => none.
+	const acl2 = { [u1]: [ 'decrypt' ] };
+	assert.equal(effectiveAny({ allowedOps: [ 'encrypt' ] }, acl2, u1), false);
+	assert.equal(effectiveAny({ allowedOps: [ 'decrypt' ] }, acl2, u1), true);
 });
 
 test('keygen: parameter resolution matrix', function() {

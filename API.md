@@ -82,18 +82,20 @@ request (bad JSON, missing/invalid `op`, oversized body).
 | 1104 | operation-disabled | 200 |
 | 1105 | invalid-acl | 200 |
 | 1106 | key-not-available (wrapping KEK not configured; authorized callers only) | 200 |
+| 1107 | operation-not-permitted (user `allowedOps` gate on `generate-key`/`list-keys`) | 200 |
 | 1900 | internal-error | 500 |
 
 Messages are short fixed strings. Within 1103 the message
 distinguishes `Invalid input token`, `JWT token expired` and
 `JWT token not yet valid`.
 
-**Masking:** a key that does not exist, a key the caller has no ACL
-class on, and a key outside its validity window all return exactly
-`1101 Key not found`. Key existence is only revealed to users holding
-at least one ACL class on the key. The single exception is `1106 Key
-not available` (the wrapping KEK is not configured on this server),
-returned only to otherwise-authorized callers.
+**Masking:** a key that does not exist, a key the caller has no
+effective class on (see `allowedOps` below), and a key outside its
+validity window all return exactly `1101 Key not found`. Key existence
+is only revealed to users holding at least one effective class on the
+key. The single exception is `1106 Key not available` (the wrapping KEK
+is not configured on this server), returned only to
+otherwise-authorized callers.
 
 ## ACL operation classes
 
@@ -103,6 +105,35 @@ returned only to otherwise-authorized callers.
 `owner` implies every other class except operations disabled by
 configuration (`export-key` without `--allow-export-key`). Every key
 always has at least one owner.
+
+## Per-user capability mask (`allowedOps`)
+
+A user may carry an optional `allowedOps` array in `vault_user.data`
+that caps what that user can do, **intersected** with the per-key ACL:
+a caller is authorized for a key operation iff the key ACL grants the
+class (owner expands to all classes) AND (`allowedOps` is absent OR the
+class ∈ `allowedOps`), with configuration disables still on top.
+
+- **Absent** `allowedOps` = unrestricted (the default). A **present**
+  array restricts to its members; the **empty array** disables
+  everything.
+- Alphabet: the seven ACL classes (not `owner`) plus two user-level
+  pseudo-classes `generate-key` and `list-keys`.
+- A key operation blocked *solely* by `allowedOps` is masked
+  identically to an ACL denial (`1101 Key not found`). `generate-key`
+  and `list-keys` have no target key, so when their pseudo-class is not
+  granted they return `1107 operation-not-permitted`.
+- `export-key` therefore has a triple gate: `--allow-export-key` AND
+  the `export-secret-key` ACL class AND `export-secret-key ∈
+  allowedOps`. `generate-key --returnPublicKey` is always allowed (the
+  caller just created the key); the standalone `public-key` operation
+  is gated by `export-public-key ∩ allowedOps`.
+
+This makes an escrow-style setup expressible: a *writer* who owns the
+escrow key but has `allowedOps` of `["generate-key","encrypt",
+"export-public-key"]` can create and encrypt to keys but never decrypt
+or export the secret — while a different vault user, assigned in the
+key ACL at generation, can read.
 
 ---
 

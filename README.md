@@ -219,10 +219,12 @@ the database (there is no HTTP admin API):
 kv-admin <command> [options]
 
 add-user       --allow-all | --allowed-ip <entry> ... [--nbf ts] [--exp ts]
+               [--allowed-ops <class> ...]
 set-token      --user <uuid>          # prints the bearer token once
 revoke-token   --user <uuid>
 set-user-data  --user <uuid> [--allow-all | --allowed-ip <entry> ...]
                [--nbf ts | --clear-nbf] [--exp ts | --clear-exp]
+               [--allowed-ops <class> ... | --clear-allowed-ops]
 remove-user    --user <uuid>
 list-users
 update-acl     --kid <uuid> --acl '<json-acl-object>'
@@ -238,6 +240,12 @@ append fails.
 IPv6 address, IPv6 CIDR (IPv6 ranges deliberately excluded). An empty
 or missing list denies all API access; `--allow-all` writes the
 explicit `["0.0.0.0/0", "0::/0"]`.
+
+`--allowed-ops` (repeatable) sets the user's capability mask (see
+[Authorization](#authorization-and-existence-masking)); classes are the
+seven ACL classes (not `owner`) plus `generate-key` and `list-keys`.
+`--allowed-ops none` sets the explicit empty (deny-all) mask;
+`--clear-allowed-ops` removes the mask (back to unrestricted).
 
 ## Vault embedding keys (KEKs)
 
@@ -300,12 +308,31 @@ least one owner. The caller of `generate-key` is automatically added
 as an owner; further ACL entries are validated (users must exist,
 classes must be known) at creation and on `kv-admin update-acl`.
 
-**Existence masking**: a key that does not exist, a key the caller
-holds no ACL class on, and a key outside its validity window all
-return exactly the same `1101 Key not found`. A key's existence is
-only revealed to users who hold at least one ACL class on it. The one
-deliberate exception is `1106 Key not available` (the wrapping KEK is
-not configured on this server), which is returned only to an already
+**Per-user capability mask (`allowedOps`).** A user may carry an
+optional `allowedOps` array in `vault_user.data` that caps what they
+can do: effective rights are the **intersection** of the key ACL grant
+(owner expanded) and `allowedOps`, with configuration disables still on
+top. An **absent** `allowedOps` is unrestricted (the default); a
+present array restricts to its members; the **empty array disables
+everything**. The alphabet is the seven ACL classes (not `owner`) plus
+two user-level pseudo-classes `generate-key` and `list-keys`, which
+must be granted explicitly once a user has any `allowedOps`.
+
+This makes escrow-style separation expressible: a *writer* with
+`allowedOps` `["generate-key","encrypt","export-public-key"]` can
+create escrow keys and encrypt to them but — even as the key's owner —
+can never `decrypt` or `export-key` the secret; a *different* vault
+user, assigned in the key's ACL at generation, does the reading.
+
+**Existence masking**: a key that does not exist, a key the caller has
+no *effective* class on (ACL ∩ `allowedOps`), and a key outside its
+validity window all return exactly the same `1101 Key not found` — an
+`allowedOps` denial is indistinguishable from an ACL denial. A key's
+existence is only revealed to users with at least one effective class
+on it. `generate-key` and `list-keys` have no target key to mask, so an
+`allowedOps` denial of those returns `1107 operation-not-permitted`.
+The one deliberate exception to key masking is `1106 Key not available`
+(the wrapping KEK is not configured), returned only to an already
 authorized caller.
 
 ## Key lifecycle and expiration
@@ -371,7 +398,8 @@ bearer token; only its sha256 digest is stored, so a database leak
 reveals no usable credentials, and the token itself is shown exactly
 once at issue. `allowedIP` and the optional account-validity
 `nbf`/`exp` gate every request (see Authentication and the data model
-above).
+above), and the optional `allowedOps` mask caps the user's
+capabilities (see [Authorization](#authorization-and-existence-masking)).
 
 ## tr-data-escrow integration
 

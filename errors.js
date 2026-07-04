@@ -14,6 +14,7 @@ const ERR = {
 	OPERATION_DISABLED: 1104,
 	INVALID_ACL: 1105,
 	KEY_NOT_AVAILABLE: 1106,
+	OPERATION_NOT_PERMITTED: 1107,
 	INTERNAL_ERROR: 1900
 };
 
@@ -30,6 +31,7 @@ const ERR_MESSAGE = {
 	[ERR.OPERATION_DISABLED]: 'Operation disabled',
 	[ERR.INVALID_ACL]: 'Invalid ACL',
 	[ERR.KEY_NOT_AVAILABLE]: 'Key not available',
+	[ERR.OPERATION_NOT_PERMITTED]: 'Operation not permitted',
 	[ERR.INTERNAL_ERROR]: 'Internal error'
 };
 

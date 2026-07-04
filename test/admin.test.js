@@ -114,6 +114,35 @@ test('kv-admin: user lifecycle', async function(t) {
 	assert.notEqual(gone.code, 0);
 });
 
+test('kv-admin: allowedOps provisioning', async function() {
+	const userId = (await admin([ 'add-user', '--allow-all',
+								  '--allowed-ops', 'generate-key',
+								  '--allowed-ops', 'encrypt' ])).stdout.trim();
+	assert.deepEqual((await db.userById(userId)).data.allowedOps.sort(),
+					 [ 'encrypt', 'generate-key' ]);
+	// set-user-data replaces the mask.
+	await admin([ 'set-user-data', '--user', userId, '--allowed-ops', 'decrypt' ]);
+	assert.deepEqual((await db.userById(userId)).data.allowedOps, [ 'decrypt' ]);
+	// the deny-all sentinel sets an empty mask.
+	await admin([ 'set-user-data', '--user', userId, '--allowed-ops', 'none' ]);
+	assert.deepEqual((await db.userById(userId)).data.allowedOps, []);
+	// clear removes the mask (back to unrestricted).
+	await admin([ 'set-user-data', '--user', userId, '--clear-allowed-ops' ]);
+	assert.equal((await db.userById(userId)).data.allowedOps, undefined);
+	// invalid entries are rejected.
+	for (const bad of [ 'owner', 'sudo' ]) {
+		const r = await admin([ 'set-user-data', '--user', userId, '--allowed-ops', bad ],
+							  { allowFailure: true });
+		assert.notEqual(r.code, 0);
+	}
+	// --allowed-ops and --clear-allowed-ops conflict.
+	const conflict = await admin([ 'set-user-data', '--user', userId,
+								   '--allowed-ops', 'encrypt', '--clear-allowed-ops' ],
+								 { allowFailure: true });
+	assert.notEqual(conflict.code, 0);
+	await admin([ 'remove-user', '--user', userId ]);
+});
+
 test('kv-admin: update-acl', async function() {
 	const owner = (await admin([ 'add-user', '--allow-all' ])).stdout.trim();
 	const other = (await admin([ 'add-user', '--allow-all' ])).stdout.trim();

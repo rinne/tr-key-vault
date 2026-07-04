@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 
 const { generateVaultKey } = require('./keygen');
-const { aclAny } = require('./acl');
+const { effectiveAny } = require('./acl');
 
 // Keystore: persistence and lifecycle of vault keys on top of the DB
 // layer and the KEK manager (SPEC.md §9.2, §10).
@@ -126,13 +126,14 @@ class KeyStore {
 		return deleted;
 	}
 
-	// Keys the user holds at least one ACL class on, inside their
-	// validity window (SPEC.md §9.10).
-	async listKeys(userId) {
+	// Keys the user holds at least one *effective* class on (ACL grant
+	// intersected with the user's allowedOps mask, SPEC.md §7.1),
+	// inside their validity window (SPEC.md §9.10).
+	async listKeys(userId, userData) {
 		const rows = await this.#db.keysByAclUser(userId);
 		const now = Date.now();
 		return rows
-			.filter((row) => (this.inWindow(row, now) && aclAny(row.acl, userId)))
+			.filter((row) => (this.inWindow(row, now) && effectiveAny(userData, row.acl, userId)))
 			.map(function(row) { return { kid: row.keyId, kty: row.kty, alg: row.alg }; });
 	}
 

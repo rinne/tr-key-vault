@@ -547,3 +547,69 @@ test('trusted-proxy-hops: XFF honored and spoof-resistant', async function(t) {
 	// Without XFF the socket peer (127.0.0.1) does not match.
 	assertApiError(await vaultP.call('healthcheck', {}, pinned), 1001, 403);
 });
+
+test('allowedOps: escrow-writer can encrypt but never decrypt/export as owner', async function() {
+	// The writer owns the key but is capped to generate/encrypt/public.
+	const writer = await vault.createUser({
+		allowedOps: [ 'generate-key', 'encrypt', 'export-public-key' ]
+	});
+	const reader = await vault.createUser(); // unrestricted
+	// Writer generates a symmetric key and grants the reader 'decrypt'.
+	const gen = assertOk(await vault.call('generate-key',
+		{ alg: 'A256GCMKW', acl: { [reader.userId]: [ 'decrypt' ] } }, writer));
+	const kid = gen.kid;
+	// Owner ACL confirms the writer is owner.
+	const row = await vault.db.keyById(kid);
+	assert.deepEqual(row.acl[writer.userId], [ 'owner' ]);
+	// encrypt: allowed (in allowedOps + owner).
+	const enc = assertOk(await vault.call('create-jwe', { kid, data: { secret: 1 } }, writer));
+	// decrypt as the writer/owner: masked as key-not-found (allowedOps blocks it).
+	assertApiError(await vault.call('decrypt-jwe', { token: enc.token, kid }, writer), 1101);
+	// but the reader (unrestricted, has decrypt) CAN decrypt — the escrow flow.
+	assertOk(await vault.call('decrypt-jwe', { token: enc.token, kid }, reader));
+	// export-key: even with the config gate on and owner, allowedOps blocks it (masked).
+	vault.opt.set('allow-export-key', true);
+	assertApiError(await vault.call('export-key', { kid }, writer), 1101);
+	vault.opt.set('allow-export-key', false);
+	// public-key: allowed. sign/verify/revoke: masked.
+	const ecGen = assertOk(await vault.call('generate-key', { alg: 'ES256' }, writer));
+	assertOk(await vault.call('public-key', { kid: ecGen.kid }, writer));
+	assertApiError(await vault.call('revoke-key', { kid }, writer), 1101);
+});
+
+test('allowedOps: generate-key and list-keys gate with 1107', async function() {
+	// A user with allowedOps that omits the pseudo-classes.
+	const u = await vault.createUser({ allowedOps: [ 'encrypt' ] });
+	assertApiError(await vault.call('generate-key', { alg: 'A256GCM' }, u), 1107);
+	assertApiError(await vault.call('list-keys', {}, u), 1107);
+	// Granting them lets the ops through.
+	const u2 = await vault.createUser({ allowedOps: [ 'generate-key', 'list-keys' ] });
+	assertOk(await vault.call('generate-key', { alg: 'A256GCM' }, u2));
+	assertOk(await vault.call('list-keys', {}, u2));
+});
+
+test('allowedOps: empty array is a full lockout; absent is unrestricted', async function() {
+	const locked = await vault.createUser({ allowedOps: [] });
+	assertApiError(await vault.call('generate-key', { alg: 'A256GCM' }, locked), 1107);
+	assertApiError(await vault.call('list-keys', {}, locked), 1107);
+	// healthcheck is never gated.
+	assertOk(await vault.call('healthcheck', {}, locked));
+	// Unrestricted user behaves exactly as before.
+	const free = await vault.createUser();
+	const kid = assertOk(await vault.call('generate-key', { alg: 'HS256' }, free)).kid;
+	assertOk(await vault.call('create-jwt', { kid, data: { a: 1 } }, free));
+});
+
+test('allowedOps: list-keys shows only keys with an effective key class', async function() {
+	// Owner but allowedOps has only the pseudo-classes: no effective *key*
+	// class, so the owned key does not appear.
+	const u = await vault.createUser({ allowedOps: [ 'generate-key', 'list-keys' ] });
+	const kid = assertOk(await vault.call('generate-key', { alg: 'A256GCM' }, u)).kid;
+	const listed = assertOk(await vault.call('list-keys', {}, u));
+	assert.ok(! listed.keys.some(function(k) { return k.kid === kid; }));
+	// With an effective key class (encrypt), the owned key appears.
+	const u2 = await vault.createUser({ allowedOps: [ 'generate-key', 'list-keys', 'encrypt' ] });
+	const kid2 = assertOk(await vault.call('generate-key', { alg: 'A256GCMKW' }, u2)).kid;
+	const listed2 = assertOk(await vault.call('list-keys', {}, u2));
+	assert.ok(listed2.keys.some(function(k) { return k.kid === kid2; }));
+});

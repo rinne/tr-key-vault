@@ -5,7 +5,7 @@ const jwt = require('tr-jwt');
 
 const { isUuid, isPlainObject, isUnixTs } = require('./basicutils');
 const { ERR, ApiError, KekUnavailableError } = require('./errors');
-const { validateAcl, aclAllows } = require('./acl');
+const { validateAcl, aclAllows, allowedOpsAllows } = require('./acl');
 const { resolveKeyGenParams, JWT_ALGS, JWE_ALGS } = require('./keygen');
 
 // API operation handlers (SPEC.md §9). Each handler is
@@ -87,7 +87,10 @@ function serverHandlers(ctx) {
 		if (! row) {
 			throw new ApiError(ERR.KEY_NOT_FOUND);
 		}
-		if (! aclAllows(row.acl, user.userId, opClass)) {
+		// Effective right = key ACL grant intersected with the user's
+		// allowedOps mask (SPEC.md §7.1). A denial from either is
+		// masked identically as key-not-found (existence masking).
+		if (! (aclAllows(row.acl, user.userId, opClass) && allowedOpsAllows(user.data, opClass))) {
 			const e = new ApiError(ERR.KEY_NOT_FOUND);
 			e.maskedDenial = true;
 			throw e;
@@ -120,6 +123,11 @@ function serverHandlers(ctx) {
 		},
 
 		'generate-key': async function(user, data, meta) {
+			// A user-level pseudo-class with no target key ACL to mask
+			// against — an ungranted caller gets a distinct 1107 (§7.1).
+			if (! allowedOpsAllows(user.data, 'generate-key')) {
+				throw new ApiError(ERR.OPERATION_NOT_PERMITTED);
+			}
 			checkProps(data, [ 'alg', 'kty', 'crv', 'keyLength', 'nbf', 'exp', 'acl', 'returnPublicKey' ]);
 			let spec;
 			try {
@@ -323,7 +331,10 @@ function serverHandlers(ctx) {
 
 		'list-keys': async function(user, data, meta) {
 			checkProps(data, []);
-			const keys = await ctx.keystore.listKeys(user.userId);
+			if (! allowedOpsAllows(user.data, 'list-keys')) {
+				throw new ApiError(ERR.OPERATION_NOT_PERMITTED);
+			}
+			const keys = await ctx.keystore.listKeys(user.userId, user.data);
 			return { data: { keys }, audit: { keyCount: keys.length } };
 		}
 
