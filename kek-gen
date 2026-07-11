@@ -6,19 +6,24 @@
 // Usage: kek-gen [-a <alg>] [-k <kid>] <file>
 //   alg: P-521 (default) | P-384 | P-256 | RSA-OAEP | RSA-OAEP-256
 //        | A128GCMKW | A192GCMKW | A256GCMKW | A128KW | A192KW | A256KW
+//        | ML-KEM-512 | ML-KEM-768 | ML-KEM-1024
 //
 // Writes the private/secret JWK to <file> with mode 0600 (never
-// overwrites). Asymmetric KEKs are preferred (SPEC.md §5).
+// overwrites). Asymmetric KEKs are preferred (SPEC.md §5). Key
+// material comes from tr-jwk (round 6); ML-KEM KEK files carry the
+// unsuffixed variant in the JWK alg member.
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+
+const { cipherKeyGen, ecKeyGen, rsaKeyGen, mlKemKeyGen } = require('tr-jwk');
 
 const Optist = require('optist');
 
 const opt = ((new Optist())
 			 .opts([
 				 { shortName: 'a', longName: 'algorithm',
-				   description: 'KEK algorithm: P-521 (default) | P-384 | P-256 | RSA-OAEP | RSA-OAEP-256 | A{128,192,256}GCMKW | A{128,192,256}KW',
+				   description: 'KEK algorithm: P-521 (default) | P-384 | P-256 | RSA-OAEP | RSA-OAEP-256 | A{128,192,256}GCMKW | A{128,192,256}KW | ML-KEM-{512,768,1024}',
 				   hasArg: true,
 				   defaultValue: 'P-521' },
 				 { shortName: 'k', longName: 'kid',
@@ -41,19 +46,18 @@ const file = opt.rest()[0];
 
 let jwk;
 if ([ 'P-256', 'P-384', 'P-521' ].includes(alg)) {
-	const namedCurve = ({ 'P-256': 'prime256v1', 'P-384': 'secp384r1', 'P-521': 'secp521r1' })[alg];
-	jwk = crypto.generateKeyPairSync('ec', { namedCurve }).privateKey.export({ format: 'jwk' });
-	delete jwk.key_ops;
+	jwk = ecKeyGen(alg).secretKey;
 	jwk.kid = kid;
 } else if ([ 'RSA-OAEP', 'RSA-OAEP-256' ].includes(alg)) {
 	const modulusLength = opt.value('rsa-modulus-length') || 4096;
-	jwk = crypto.generateKeyPairSync('rsa', { modulusLength }).privateKey.export({ format: 'jwk' });
-	delete jwk.key_ops;
+	jwk = rsaKeyGen(modulusLength).secretKey;
 	jwk.alg = alg;
 	jwk.kid = kid;
 } else if (/^A(128|192|256)(GCMKW|KW)$/.test(alg)) {
-	const bits = Number.parseInt(/^A(\d+)/.exec(alg)[1]);
-	jwk = { kty: 'oct', k: crypto.randomBytes(bits / 8).toString('base64url'), alg, kid };
+	jwk = { kty: 'oct', k: cipherKeyGen(alg).k, alg, kid };
+} else if ([ 'ML-KEM-512', 'ML-KEM-768', 'ML-KEM-1024' ].includes(alg)) {
+	jwk = mlKemKeyGen(alg).secretKey;
+	jwk.kid = kid;
 } else {
 	console.error(`kek-gen: unsupported algorithm ${alg}`);
 	process.exit(1);

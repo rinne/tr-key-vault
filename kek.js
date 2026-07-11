@@ -15,6 +15,12 @@ const { KekUnavailableError } = require('./errors');
 const KEK_OCT_ALGS = [ 'A128GCMKW', 'A192GCMKW', 'A256GCMKW', 'A128KW', 'A192KW', 'A256KW' ];
 const KEK_RSA_ALGS = [ 'RSA-OAEP', 'RSA-OAEP-256' ];
 const KEK_EC_CURVES = [ 'P-256', 'P-384', 'P-521' ];
+// The KEK JWK carries the unsuffixed ML-KEM variant (as emitted by
+// key generation and required by tr-jwe key validation); the wrap
+// algorithm is the suffixed vault/JWE identifier (SPEC.md §9.2).
+const KEK_ML_KEM_WRAP = { 'ML-KEM-512': 'ML-KEM-512@spinium.com',
+						  'ML-KEM-768': 'ML-KEM-768@spinium.com',
+						  'ML-KEM-1024': 'ML-KEM-1024@spinium.com' };
 const KEK_RSA_MODULUS_MIN = 2048;
 const KEK_OCT_BITS = { 'A128GCMKW': 128, 'A192GCMKW': 192, 'A256GCMKW': 256,
 					   'A128KW': 128, 'A192KW': 192, 'A256KW': 256 };
@@ -71,6 +77,16 @@ function validateKek(jwk, source) {
 		}
 		const wrapJwk = { kty: 'EC', crv: jwk.crv, x: jwk.x, y: jwk.y, kid: jwk.kid };
 		return { kid: jwk.kid, wrapAlg: 'ECDH-ES', secretJwk: jwk, wrapJwk };
+	}
+	if (jwk.kty === 'AKP') {
+		if (! KEK_ML_KEM_WRAP[jwk.alg]) {
+			fail('AKP KEK alg must be an ML-KEM variant');
+		}
+		if (! ((typeof(jwk.priv) === 'string') && (typeof(jwk.pub) === 'string'))) {
+			fail('ML-KEM KEK must be a private key');
+		}
+		const wrapJwk = { kty: 'AKP', alg: jwk.alg, pub: jwk.pub, kid: jwk.kid };
+		return { kid: jwk.kid, wrapAlg: KEK_ML_KEM_WRAP[jwk.alg], secretJwk: jwk, wrapJwk };
 	}
 	fail('unsupported key type');
 }

@@ -105,9 +105,12 @@ Supported algorithms (full parameter matrix in [`API.md`](API.md)):
 - **Signing (JWT)**: `HS256/384/512`, `ES256/384/512` (P-256/384/521),
   `RS256/384/512`.
 - **Encryption (JWE)**: `A{128,192,256}GCMKW`, `A{128,192,256}KW`,
-  `ECDH-ES` (EC P-256/384/521), `RSA-OAEP`, `RSA-OAEP-256`. The inner
-  content encryption is chosen by the vault from the key, never by the
-  caller; JOSE protected headers are entirely server-controlled.
+  `ECDH-ES` (EC P-256/384/521), `RSA-OAEP`, `RSA-OAEP-256`, and
+  post-quantum `ML-KEM-{512,768,1024}@spinium.com` (FIPS 203 key
+  encapsulation via tr-jwe; suffixed identifiers frozen at
+  draft-ietf-jose-pqc-kem-05 semantics). The inner content encryption
+  is chosen by the vault from the key, never by the caller; JOSE
+  protected headers are entirely server-controlled.
 
 Key material never leaves the vault except the public key
 (`public-key`, or `generate-key` with `returnPublicKey`) and the
@@ -264,12 +267,14 @@ generated with the bundled `kek-gen`:
 ```sh
 ./kek-gen kek-active.json                      # EC P-521 (preferred)
 ./kek-gen -a RSA-OAEP-256 kek-active.json      # RSA 4096
+./kek-gen -a ML-KEM-768 kek-active.json        # post-quantum
 ./kek-gen -a A256GCMKW kek-active.json         # symmetric (discouraged)
 ```
 
 Accepted KEK types: EC P-256/P-384/P-521 (ECDH-ES), RSA `RSA-OAEP` /
 `RSA-OAEP-256` (modulus ≥ 2048), oct `A{128,192,256}GCMKW` /
-`A{128,192,256}KW`.
+`A{128,192,256}KW`, and post-quantum AKP `ML-KEM-{512,768,1024}`
+(wrapped as `ML-KEM-*@spinium.com` JWEs).
 
 ### KEK rotation runbook
 

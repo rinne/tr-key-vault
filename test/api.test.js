@@ -325,6 +325,34 @@ test('jwe: asymmetric roundtrip and local interop', async function() {
 	assert.equal(dec3.data, 'plain string payload');
 });
 
+test('jwe: ML-KEM roundtrip and local interop', async function() {
+	for (const alg of [ 'ML-KEM-512@spinium.com', 'ML-KEM-768@spinium.com', 'ML-KEM-1024@spinium.com' ]) {
+		const gen = assertOk(await vault.call('generate-key', { alg, returnPublicKey: true }, alice));
+		// The exported public key is an AKP JWK carrying the UNSUFFIXED
+		// variant (what tr-jwe key validation requires); the vault-level
+		// algorithm stays suffixed.
+		assert.equal(gen.key.kty, 'AKP');
+		assert.equal(gen.key.alg, alg.replace('@spinium.com', ''));
+		assert.equal(gen.key.priv, undefined);
+		const created = assertOk(await vault.call('create-jwe', { kid: gen.kid, data: { pq: alg } }, alice));
+		const header = JSON.parse(Buffer.from(created.token.split('.')[0], 'base64url').toString('utf8'));
+		assert.equal(header.alg, alg);
+		assert.equal(header.enc, 'A256GCM');
+		const dec = assertOk(await vault.call('decrypt-jwe', { token: created.token, kid: gen.kid }, alice));
+		assert.deepEqual(dec.data, { pq: alg });
+		// The tr-data-escrow reader flow: encrypted OUTSIDE the vault
+		// with plain tr-jwe to the exported public key, decrypted inside.
+		const external = jwe.encrypt(alg, gen.key, { escrow: alg });
+		const dec2 = assertOk(await vault.call('decrypt-jwe', { token: external, kid: gen.kid }, alice));
+		assert.deepEqual(dec2.data, { escrow: alg });
+	}
+	// crv/keyLength are not applicable to ML-KEM.
+	assertApiError(await vault.call('generate-key', { alg: 'ML-KEM-768@spinium.com', keyLength: 768 }, alice), 1100);
+	assertApiError(await vault.call('generate-key', { alg: 'ML-KEM-768@spinium.com', crv: 'P-256' }, alice), 1100);
+	// The unsuffixed draft name is not a vault algorithm.
+	assertApiError(await vault.call('generate-key', { alg: 'ML-KEM-768' }, alice), 1100);
+});
+
 test('jwe: incompatible key and tampering', async function() {
 	const sigKid = await generateKey(alice, { alg: 'ES256' });
 	assertApiError(await vault.call('create-jwe', { kid: sigKid, data: {} }, alice), 1102);

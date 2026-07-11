@@ -1,6 +1,7 @@
 'use strict';
 
-const { macKeyGenAsync, cipherKeyGenAsync, ecKeyGenAsync, rsaKeyGenAsync } = require('tr-jwk');
+const { macKeyGenAsync, cipherKeyGenAsync, ecKeyGenAsync, rsaKeyGenAsync,
+		mlKemKeyGenAsync } = require('tr-jwk');
 
 const { isPlainObject } = require('./basicutils');
 
@@ -11,8 +12,16 @@ const { isPlainObject } = require('./basicutils');
 // resolved in tr-jwk 2.x). The generated JWKs are re-stamped below to
 // the vault's frozen member sets.
 
-// The v1 algorithm matrix (SPEC.md §9.2). Deliberately excluded:
+// The algorithm matrix (SPEC.md §9.2). Deliberately excluded:
 // dir, RSA1_5, PS*, ML-DSA, alg-less generation.
+//
+// The ML-KEM algorithms (round 8) use tr-jwe's collision-resistant
+// suffixed identifiers frozen at draft-ietf-jose-pqc-kem-05
+// semantics. The vault-level algorithm (generate-key request,
+// vault_key.alg, list-keys, JWE protected header) is the SUFFIXED
+// name; the stored AKP JWK carries the UNSUFFIXED variant in its
+// `alg` member, which is what node:crypto emits and what tr-jwe's
+// key validation requires.
 const KEYGEN_ALGS = {
 	'A128GCM':   { kty: 'oct', kind: 'aes', bits: 128, use: 'enc', keyOps: [ 'encrypt', 'decrypt' ] },
 	'A192GCM':   { kty: 'oct', kind: 'aes', bits: 192, use: 'enc', keyOps: [ 'encrypt', 'decrypt' ] },
@@ -34,7 +43,10 @@ const KEYGEN_ALGS = {
 	'RSA-OAEP-256': { kty: 'RSA', kind: 'rsa', defaultModulus: 4096, use: 'enc' },
 	'RS256':     { kty: 'RSA', kind: 'rsa', defaultModulus: 2048, use: 'sig' },
 	'RS384':     { kty: 'RSA', kind: 'rsa', defaultModulus: 3072, use: 'sig' },
-	'RS512':     { kty: 'RSA', kind: 'rsa', defaultModulus: 4096, use: 'sig' }
+	'RS512':     { kty: 'RSA', kind: 'rsa', defaultModulus: 4096, use: 'sig' },
+	'ML-KEM-512@spinium.com':  { kty: 'AKP', kind: 'ml-kem', variant: 'ML-KEM-512', use: 'enc' },
+	'ML-KEM-768@spinium.com':  { kty: 'AKP', kind: 'ml-kem', variant: 'ML-KEM-768', use: 'enc' },
+	'ML-KEM-1024@spinium.com': { kty: 'AKP', kind: 'ml-kem', variant: 'ML-KEM-1024', use: 'enc' }
 };
 
 const OCT_MAX_BITS = 4096;
@@ -58,6 +70,12 @@ function resolveKeyGenParams(params) {
 		throw new Error('Key type does not match algorithm');
 	}
 	const spec = { alg, kty: a.kty, kind: a.kind, use: a.use, keyOps: a.keyOps };
+	if (a.kind === 'ml-kem') {
+		if (keyLength !== undefined) {
+			throw new Error('keyLength is not applicable to ML-KEM keys');
+		}
+		spec.variant = a.variant;
+	}
 	if (a.kind === 'ec') {
 		if (keyLength !== undefined) {
 			throw new Error('keyLength is not applicable to EC keys');
@@ -131,6 +149,13 @@ async function generateVaultKey(spec) {
 		const pair = await rsaKeyGenAsync(spec.modulusLength);
 		return { kid: pair.secretKey.kid, kty: 'RSA', alg: spec.alg, ...stampPair(pair, spec.alg, spec.use) };
 	}
+	if (spec.kind === 'ml-kem') {
+		// The JWK alg member stays the UNSUFFIXED variant (tr-jwe key
+		// validation requirement); the returned/stored vault-level alg
+		// is the suffixed name.
+		const pair = await mlKemKeyGenAsync(spec.variant);
+		return { kid: pair.secretKey.kid, kty: 'AKP', alg: spec.alg, ...stampPair(pair, spec.variant, spec.use) };
+	}
 	throw new Error('Internal error');
 }
 
@@ -147,7 +172,8 @@ function stampPair(pair, alg, use) {
 
 // Operation compatibility sets (SPEC.md §9.4–§9.7).
 const JWT_ALGS = [ 'HS256', 'HS384', 'HS512', 'ES256', 'ES384', 'ES512', 'RS256', 'RS384', 'RS512' ];
-const JWE_ALGS = [ 'A128GCMKW', 'A192GCMKW', 'A256GCMKW', 'A128KW', 'A192KW', 'A256KW', 'ECDH-ES', 'RSA-OAEP', 'RSA-OAEP-256' ];
+const JWE_ALGS = [ 'A128GCMKW', 'A192GCMKW', 'A256GCMKW', 'A128KW', 'A192KW', 'A256KW', 'ECDH-ES', 'RSA-OAEP', 'RSA-OAEP-256',
+				   'ML-KEM-512@spinium.com', 'ML-KEM-768@spinium.com', 'ML-KEM-1024@spinium.com' ];
 
 module.exports = { KEYGEN_ALGS, JWT_ALGS, JWE_ALGS, resolveKeyGenParams, generateVaultKey,
 				   RSA_MODULUS_MIN, RSA_MODULUS_MAX, OCT_MAX_BITS };

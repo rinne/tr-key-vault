@@ -42,6 +42,13 @@ function makeOctKekJwk(kid, alg) {
 	return { kty: 'oct', k: crypto.randomBytes(bits / 8).toString('base64url'), alg: a, kid };
 }
 
+function makeMlKemKekJwk(kid, variant) {
+	const v = variant || 'ML-KEM-768';
+	const jwk = crypto.generateKeyPairSync(v.toLowerCase(), {}).privateKey.export({ format: 'jwk' });
+	jwk.kid = kid;
+	return jwk;
+}
+
 async function writeKekFile(dir, jwk) {
 	const file = path.join(dir, `${jwk.kid}.json`);
 	await fs.writeFile(file, JSON.stringify(jwk), { mode: 0o600 });
@@ -160,5 +167,5 @@ async function startVault(pg, options) {
 			 createUser, call, stop, kekDir: dir };
 }
 
-module.exports = { makeEcKekJwk, makeRsaKekJwk, makeOctKekJwk, writeKekFile,
+module.exports = { makeEcKekJwk, makeRsaKekJwk, makeOctKekJwk, makeMlKemKekJwk, writeKekFile,
 				   stubOpt, startVault };

@@ -188,6 +188,15 @@ Algorithm matrix:
 | RSA | `RSA-OAEP` | default 2048; `keyLength` 2048–16384 |
 | RSA | `RSA-OAEP-256` | default 4096 |
 | RSA | `RS256` `RS384` `RS512` | defaults 2048/3072/4096 |
+| AKP | `ML-KEM-512@spinium.com` `ML-KEM-768@spinium.com` `ML-KEM-1024@spinium.com` | implied by variant; no `crv`/`keyLength` |
+
+The ML-KEM (FIPS 203, post-quantum) algorithms use tr-jwe's
+collision-resistant suffixed identifiers, frozen at
+draft-ietf-jose-pqc-kem-05 semantics. The vault-level algorithm
+(requests, `list-keys`, JWE protected headers) is the suffixed name;
+the AKP JWKs themselves (e.g. the `public-key`/`returnPublicKey`
+output) carry the unsuffixed variant in their `alg` member, as
+required for JOSE-level interoperability with tr-jwe.
 
 Errors: 1100 (parameters), 1105 (ACL: not an object, unknown user,
 unknown class).

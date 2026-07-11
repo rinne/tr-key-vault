@@ -13,7 +13,7 @@ const { resolveKeyGenParams, generateVaultKey, KEYGEN_ALGS } = require('../keyge
 const { validateKek, loadKekFile, KekManager, kekInit } = require('../kek');
 const { KekUnavailableError } = require('../errors');
 const KeyStore = require('../keystore');
-const { makeEcKekJwk, makeRsaKekJwk, makeOctKekJwk, writeKekFile } = require('./fixtures');
+const { makeEcKekJwk, makeRsaKekJwk, makeOctKekJwk, makeMlKemKekJwk, writeKekFile } = require('./fixtures');
 
 async function gen(params) {
 	return generateVaultKey(resolveKeyGenParams(params));
@@ -65,15 +65,22 @@ test('keygen: exact JWK member sets must not drift', async function() {
 		EC: { secret: [ 'alg', 'crv', 'd', 'kid', 'kty', 'use', 'x', 'y' ],
 			  public: [ 'alg', 'crv', 'kid', 'kty', 'use', 'x', 'y' ] },
 		RSA: { secret: [ 'alg', 'd', 'dp', 'dq', 'e', 'kid', 'kty', 'n', 'p', 'q', 'qi', 'use' ],
-			   public: [ 'alg', 'e', 'kid', 'kty', 'n', 'use' ] }
+			   public: [ 'alg', 'e', 'kid', 'kty', 'n', 'use' ] },
+		AKP: { secret: [ 'alg', 'kid', 'kty', 'priv', 'pub', 'use' ],
+			   public: [ 'alg', 'kid', 'kty', 'pub', 'use' ] }
 	};
 	const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 	for (const alg of Object.keys(KEYGEN_ALGS)) {
 		const spec = resolveKeyGenParams({ alg });
 		const k = await generateVaultKey(spec);
 		const e = expected[k.kty];
+		// ML-KEM: vault-level alg is the suffixed identifier, the JWK
+		// alg member carries the unsuffixed variant (tr-jwe key
+		// validation requirement).
+		const jwkAlg = spec.variant ?? alg;
+		assert.equal(k.alg, alg, alg);
 		assert.deepEqual(Object.keys(k.secretKey).sort(), e.secret, alg + ' secret member set');
-		assert.equal(k.secretKey.alg, alg, alg);
+		assert.equal(k.secretKey.alg, jwkAlg, alg);
 		assert.equal(k.secretKey.use, spec.use, alg);
 		assert.match(k.secretKey.kid, uuidRe, alg);
 		assert.equal(k.secretKey.kid, k.kid, alg);
@@ -83,7 +90,7 @@ test('keygen: exact JWK member sets must not drift', async function() {
 		} else {
 			assert.deepEqual(Object.keys(k.publicKey).sort(), e.public, alg + ' public member set');
 			assert.equal(k.publicKey.kid, k.kid, alg);
-			assert.equal(k.publicKey.alg, alg, alg);
+			assert.equal(k.publicKey.alg, jwkAlg, alg);
 			assert.equal(k.publicKey.use, spec.use, alg);
 		}
 	}
@@ -116,6 +123,16 @@ test('keygen: JWE encrypt/decrypt roundtrips', async function() {
 		const token = jwe.encrypt(alg, k.publicKey, { secret: alg });
 		assert.deepEqual(jwe.decrypt(token, k.secretKey), { secret: alg });
 	}
+	for (const alg of [ 'ML-KEM-512@spinium.com', 'ML-KEM-768@spinium.com', 'ML-KEM-1024@spinium.com' ]) {
+		const k = await gen({ alg });
+		const token = jwe.encrypt(alg, k.publicKey, { secret: alg });
+		assert.deepEqual(jwe.decrypt(token, k.secretKey), { secret: alg });
+		// The protected header carries the suffixed algorithm and the ek param.
+		const header = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8'));
+		assert.equal(header.alg, alg);
+		assert.equal(header.enc, 'A256GCM');
+		assert.match(header.ek, /^[0-9a-zA-Z_-]+$/);
+	}
 });
 
 test('kek: validation rules', function() {
@@ -124,6 +141,13 @@ test('kek: validation rules', function() {
 	assert.ok(validateKek(makeRsaKekJwk('k2b', 'RSA-OAEP-256')));
 	assert.ok(validateKek(makeOctKekJwk('k3', 'A256GCMKW')));
 	assert.ok(validateKek(makeOctKekJwk('k4', 'A128KW')));
+	// ML-KEM KEK: unsuffixed variant in the JWK, suffixed wrap alg.
+	const mlkem = validateKek(makeMlKemKekJwk('k4b', 'ML-KEM-1024'));
+	assert.equal(mlkem.wrapAlg, 'ML-KEM-1024@spinium.com');
+	assert.equal(mlkem.wrapJwk.priv, undefined);
+	const pubOnly = makeMlKemKekJwk('k4c');
+	delete pubOnly.priv;
+	assert.throws(function() { validateKek(pubOnly); }, /private key/);
 	// kid required.
 	const noKid = makeEcKekJwk('k5');
 	delete noKid.kid;
@@ -149,7 +173,8 @@ test('kek: validation rules', function() {
 test('kek: embed/extract roundtrip with every KEK type', async function() {
 	const key = await gen({ alg: 'A256GCM' });
 	for (const kekJwk of [ makeEcKekJwk('ec-kek'), makeRsaKekJwk('rsa-kek'),
-						   makeOctKekJwk('oct-kek', 'A256GCMKW'), makeOctKekJwk('kw-kek', 'A128KW') ]) {
+						   makeOctKekJwk('oct-kek', 'A256GCMKW'), makeOctKekJwk('kw-kek', 'A128KW'),
+						   makeMlKemKekJwk('mlkem-kek', 'ML-KEM-768') ]) {
 		const mgr = new KekManager(validateKek(kekJwk), []);
 		const { embeddingKeyId, embeddedKey } = await mgr.embed(key.secretKey,
 																{ kid: key.kid, iat: 1000, nbf: 900, exp: 2000 });
