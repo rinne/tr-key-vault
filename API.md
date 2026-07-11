@@ -192,7 +192,10 @@ Algorithm matrix:
 
 The ML-KEM (FIPS 203, post-quantum) algorithms use tr-jwe's
 collision-resistant suffixed identifiers, frozen at
-draft-ietf-jose-pqc-kem-05 semantics. The vault-level algorithm
+draft-ietf-jose-pqc-kem-05 semantics — the last draft revision to
+specify a JWE mechanism (from -06 the document is COSE-only, and JOSE
+post-quantum work moved to an HPKE-based track), so the suffixed
+names are the stable long-term identifiers. The vault-level algorithm
 (requests, `list-keys`, JWE protected headers) is the suffixed name;
 the AKP JWKs themselves (e.g. the `public-key`/`returnPublicKey`
 output) carry the unsuffixed variant in their `alg` member, as
