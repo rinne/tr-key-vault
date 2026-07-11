@@ -346,7 +346,7 @@ module.exports = async function() {
 			for (const row of rows) {
 				let secretJwk;
 				try {
-					secretJwk = kek.extract(row.embeddingKeyId, row.embeddedKey, row.keyId);
+					secretJwk = await kek.extract(row.embeddingKeyId, row.embeddedKey, row.keyId);
 				} catch (e) {
 					log(`WARNING: skipping ${row.keyId} (${e.message})`);
 					skipped++;
@@ -359,7 +359,7 @@ module.exports = async function() {
 				if (row.expiresAt) {
 					meta.exp = Math.floor(row.expiresAt.getTime() / 1000);
 				}
-				const { embeddingKeyId, embeddedKey } = kek.embed(secretJwk, meta);
+				const { embeddingKeyId, embeddedKey } = await kek.embed(secretJwk, meta);
 				await ctx.db.updateKeyEmbedding(row.keyId, embeddingKeyId, embeddedKey);
 				rewrapped++;
 			}

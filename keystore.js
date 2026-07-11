@@ -56,7 +56,7 @@ class KeyStore {
 		if (exp !== undefined) {
 			embedMeta.exp = exp;
 		}
-		const { embeddingKeyId, embeddedKey } = this.#kek.embed(generated.secretKey, embedMeta);
+		const { embeddingKeyId, embeddedKey } = await this.#kek.embed(generated.secretKey, embedMeta);
 		await this.#db.insertKey({
 			keyId: generated.kid,
 			kty: generated.kty,
@@ -93,7 +93,7 @@ class KeyStore {
 	// Unwrap the stored secret JWK of a key row, via the bounded
 	// LRU+TTL cache. Throws KekUnavailableError when the wrapping KEK
 	// is not configured.
-	unwrap(row) {
+	async unwrap(row) {
 		if (this.#cacheMaxEntries < 1) {
 			return this.#kek.extract(row.embeddingKeyId, row.embeddedKey, row.keyId);
 		}
@@ -107,7 +107,7 @@ class KeyStore {
 				return cached.jwk;
 			}
 		}
-		const jwk = this.#kek.extract(row.embeddingKeyId, row.embeddedKey, row.keyId);
+		const jwk = await this.#kek.extract(row.embeddingKeyId, row.embeddedKey, row.keyId);
 		this.#cache.set(row.keyId, { embHash, jwk, expires: now + this.#cacheTtlMs });
 		while (this.#cache.size > this.#cacheMaxEntries) {
 			this.#cache.delete(this.#cache.keys().next().value);

@@ -104,9 +104,9 @@ function serverHandlers(ctx) {
 	// Unwrap the stored secret JWK; an unconfigured wrapping KEK is
 	// reported as key-not-available — the caller is authorized at
 	// this point (SPEC.md §5).
-	function unwrapKey(row) {
+	async function unwrapKey(row) {
 		try {
-			return ctx.keystore.unwrap(row);
+			return await ctx.keystore.unwrap(row);
 		} catch (e) {
 			if (e instanceof KekUnavailableError) {
 				throw new ApiError(ERR.KEY_NOT_AVAILABLE);
@@ -243,10 +243,10 @@ function serverHandlers(ctx) {
 			if (! JWT_ALGS.includes(row.alg)) {
 				throw new ApiError(ERR.INCOMPATIBLE_KEY_TYPE);
 			}
-			const jwk = unwrapKey(row);
+			const jwk = await unwrapKey(row);
 			let token;
 			try {
-				token = jwt.encode(row.alg, jwk, data.data);
+				token = await jwt.encodeAsync(row.alg, jwk, data.data);
 			} catch (e) {
 				if (/^Invalid JWT claim/.test(e?.message ?? '')) {
 					throw new ApiError(ERR.INVALID_REQUEST_DATA, e.message);
@@ -269,10 +269,10 @@ function serverHandlers(ctx) {
 			if (header.alg !== row.alg) {
 				throw new ApiError(ERR.INVALID_INPUT_TOKEN);
 			}
-			const jwk = ((row.kty === 'oct') ? unwrapKey(row) : row.publicKey);
+			const jwk = ((row.kty === 'oct') ? await unwrapKey(row) : row.publicKey);
 			let payload;
 			try {
-				payload = jwt.decode(data.token, jwk);
+				payload = await jwt.decodeAsync(data.token, jwk);
 			} catch (e) {
 				const msg = e?.message ?? '';
 				if ((msg === 'JWT token expired') || (msg === 'JWT token not yet valid')) {
@@ -298,9 +298,9 @@ function serverHandlers(ctx) {
 			}
 			// Asymmetric keys encrypt with the public half from the
 			// row — no KEK unwrap needed.
-			const jwk = ((row.kty === 'oct') ? unwrapKey(row) : row.publicKey);
-			const token = jwe.encrypt(row.alg, jwk, data.data,
-									  { compressPayload: (data.compress ?? false) });
+			const jwk = ((row.kty === 'oct') ? await unwrapKey(row) : row.publicKey);
+			const token = await jwe.encryptAsync(row.alg, jwk, data.data,
+												 { compressPayload: (data.compress ?? false) });
 			return { data: { token }, audit: { kid } };
 		},
 
@@ -315,10 +315,10 @@ function serverHandlers(ctx) {
 			if (header.alg !== row.alg) {
 				throw new ApiError(ERR.INVALID_INPUT_TOKEN);
 			}
-			const jwk = unwrapKey(row);
+			const jwk = await unwrapKey(row);
 			let payload;
 			try {
-				payload = jwe.decrypt(data.token, jwk);
+				payload = await jwe.decryptAsync(data.token, jwk);
 			} catch (e) {
 				throw new ApiError(ERR.INVALID_INPUT_TOKEN);
 			}
@@ -347,7 +347,7 @@ function serverHandlers(ctx) {
 				throw new ApiError(ERR.OPERATION_DISABLED);
 			}
 			const row = await authorizedKey(user, kid, 'export-secret-key');
-			const jwk = unwrapKey(row);
+			const jwk = await unwrapKey(row);
 			return { data: { key: jwk }, audit: { kid } };
 		},
 

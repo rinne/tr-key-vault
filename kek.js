@@ -124,8 +124,9 @@ class KekManager {
 
 	// Wrap a secret JWK into the stored embedded-key JWE
 	// (JWE-KEY-EMBEDDING.md; SPEC.md §5.1). Returns
-	// { embeddingKeyId, embeddedKey }.
-	embed(secretJwk, meta) {
+	// { embeddingKeyId, embeddedKey }. Asynchronous: the JWE crypto
+	// runs off the event loop where tr-jwe supports it.
+	async embed(secretJwk, meta) {
 		const claims = { kid: meta.kid, iat: meta.iat };
 		if (meta.nbf !== undefined) {
 			claims.nbf = meta.nbf;
@@ -134,19 +135,19 @@ class KekManager {
 			claims.exp = meta.exp;
 		}
 		claims.key = secretJwk;
-		const embeddedKey = jwe.encrypt(this.#active.wrapAlg, this.#active.wrapJwk, claims);
+		const embeddedKey = await jwe.encryptAsync(this.#active.wrapAlg, this.#active.wrapJwk, claims);
 		return { embeddingKeyId: this.#active.kid, embeddedKey };
 	}
 
 	// Unwrap a stored embedded-key JWE. Verifies the embedding-spec
 	// consistency rules before returning the JWK. Throws
 	// KekUnavailableError when the wrapping KEK is not configured.
-	extract(embeddingKeyId, embeddedKey, expectedKid) {
+	async extract(embeddingKeyId, embeddedKey, expectedKid) {
 		const kek = this.#byId.get(embeddingKeyId);
 		if (! kek) {
 			throw new KekUnavailableError(embeddingKeyId);
 		}
-		const claims = jwe.decrypt(embeddedKey, kek.secretJwk);
+		const claims = await jwe.decryptAsync(embeddedKey, kek.secretJwk);
 		if (! (isPlainObject(claims) && isPlainObject(claims.key))) {
 			throw new Error('Embedded key payload is not a key embedding');
 		}

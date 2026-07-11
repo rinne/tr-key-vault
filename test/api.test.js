@@ -260,7 +260,7 @@ test('jwt: kid mismatch, alg confusion, expiry', async function() {
 	// Garbage token.
 	assertApiError(await vault.call('verify-jwt', { token: 'garbage' }, alice), 1103);
 	// No kid anywhere: strip it by re-encoding with a kid-less JWK.
-	const raw = vault.keystore.unwrap(await vault.db.keyById(kid));
+	const raw = await vault.keystore.unwrap(await vault.db.keyById(kid));
 	const kidless = Object.assign({}, raw);
 	delete kidless.kid;
 	const tokenNoKid = jwt.encode('HS256', kidless, { a: 1 });

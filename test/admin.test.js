@@ -207,7 +207,7 @@ test('kv-admin: rewrap re-embeds rows under the active KEK', async function(t) {
 	// A key wrapped with the OLD KEK.
 	const generated = await generateVaultKey(resolveKeyGenParams({ alg: 'HS256' }));
 	const oldMgr = new KekManager(validateKek(oldJwk), []);
-	const wrapped = oldMgr.embed(generated.secretKey, { kid: generated.kid, iat: 1 });
+	const wrapped = await oldMgr.embed(generated.secretKey, { kid: generated.kid, iat: 1 });
 	await db.insertKey({ keyId: generated.kid, kty: 'oct', alg: 'HS256', publicKey: null,
 						 embeddingKeyId: wrapped.embeddingKeyId, embeddedKey: wrapped.embeddedKey,
 						 acl: {} });
@@ -219,7 +219,7 @@ test('kv-admin: rewrap re-embeds rows under the active KEK', async function(t) {
 	assert.equal(row.embeddingKeyId, 'adm-new-kek');
 	// The re-embedded key unwraps with the new KEK alone.
 	const newMgr = await kekInit(newFile, []);
-	assert.deepEqual(newMgr.extract(row.embeddingKeyId, row.embeddedKey, generated.kid),
+	assert.deepEqual(await newMgr.extract(row.embeddingKeyId, row.embeddedKey, generated.kid),
 					 generated.secretKey);
 	// nbf/exp survive a rewrap into the embedded claims.
 	await db.deleteKey(generated.kid);

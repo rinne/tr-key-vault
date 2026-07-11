@@ -1,15 +1,15 @@
 'use strict';
 
-const crypto = require('node:crypto');
-const { promisify } = require('node:util');
+const { macKeyGenAsync, cipherKeyGenAsync, ecKeyGenAsync, rsaKeyGenAsync } = require('tr-jwk');
 
 const { isPlainObject } = require('./basicutils');
 
-// Key pair generation is asynchronous (libuv thread pool) so that RSA
-// generation in particular never blocks the event loop; symmetric key
-// generation is cheap but uses the async form for uniformity.
-const generateKeyPair = promisify(crypto.generateKeyPair);
-const generateKey = promisify(crypto.generateKey);
+// All key material comes from the asynchronous tr-jwk generators
+// (libuv thread pool) so that RSA generation in particular never
+// blocks the event loop (OPEN-QUESTIONS round 6 reversal of Q41; the
+// original reason for in-house generation was tr-jwk's synchronicity,
+// resolved in tr-jwk 2.x). The generated JWKs are re-stamped below to
+// the vault's frozen member sets.
 
 // The v1 algorithm matrix (SPEC.md §9.2). Deliberately excluded:
 // dir, RSA1_5, PS*, ML-DSA, alg-less generation.
@@ -40,9 +40,6 @@ const KEYGEN_ALGS = {
 const OCT_MAX_BITS = 4096;
 const RSA_MODULUS_MIN = 2048;
 const RSA_MODULUS_MAX = 16384;
-
-// Named curve mapping for node:crypto.
-const EC_NAMED_CURVE = { 'P-256': 'prime256v1', 'P-384': 'secp384r1', 'P-521': 'secp521r1' };
 
 // Resolve and validate the generation parameters of a generate-key
 // request ({ alg, kty?, crv?, keyLength? }). Returns a normalized
@@ -110,46 +107,41 @@ function resolveKeyGenParams(params) {
 // { kid, kty, alg, secretKey, publicKey } where secretKey is the full
 // JWK (secret material) and publicKey the public JWK or null for
 // symmetric keys. Both JWKs carry kid, alg and use; the oct member
-// set additionally carries key_ops. The member sets follow the
-// tr-data-escrow / tr-jwk conventions and must not drift — these JWKs
-// are embedded verbatim inside the stored JWEs and consumed by
-// tr-jwe/tr-jwt.
+// set additionally carries key_ops. The member sets are frozen — these
+// JWKs are embedded verbatim inside the stored JWEs and consumed by
+// tr-jwe/tr-jwt — so the tr-jwk output is always re-stamped into the
+// vault's own shape and only the key material and kid are taken as-is
+// (the tr-jwk kid is a random UUID, shared by both halves of a pair).
 async function generateVaultKey(spec) {
-	const kid = crypto.randomUUID();
 	if (spec.kind === 'aes') {
-		const key = await generateKey('aes', { length: spec.bits });
-		const jwk = key.export({ format: 'jwk' });
-		const secretKey = { kty: 'oct', k: jwk.k, alg: spec.alg, key_ops: spec.keyOps.slice(), use: spec.use, kid };
-		return { kid, kty: 'oct', alg: spec.alg, secretKey, publicKey: null };
+		const jwk = await cipherKeyGenAsync(spec.alg);
+		const secretKey = { kty: 'oct', k: jwk.k, alg: spec.alg, key_ops: spec.keyOps.slice(), use: spec.use, kid: jwk.kid };
+		return { kid: jwk.kid, kty: 'oct', alg: spec.alg, secretKey, publicKey: null };
 	}
 	if (spec.kind === 'hmac') {
-		const key = await generateKey('hmac', { length: spec.bits });
-		const jwk = key.export({ format: 'jwk' });
-		const secretKey = { kty: 'oct', k: jwk.k, alg: spec.alg, key_ops: spec.keyOps.slice(), use: spec.use, kid };
-		return { kid, kty: 'oct', alg: spec.alg, secretKey, publicKey: null };
+		const jwk = await macKeyGenAsync(spec.alg, { length: spec.bits });
+		const secretKey = { kty: 'oct', k: jwk.k, alg: spec.alg, key_ops: spec.keyOps.slice(), use: spec.use, kid: jwk.kid };
+		return { kid: jwk.kid, kty: 'oct', alg: spec.alg, secretKey, publicKey: null };
 	}
 	if (spec.kind === 'ec') {
-		const pair = await generateKeyPair('ec', { namedCurve: EC_NAMED_CURVE[spec.crv] });
-		return { kid, kty: 'EC', alg: spec.alg, ...exportPair(pair, kid, spec.alg, spec.use) };
+		const pair = await ecKeyGenAsync(spec.crv);
+		return { kid: pair.secretKey.kid, kty: 'EC', alg: spec.alg, ...stampPair(pair, spec.alg, spec.use) };
 	}
 	if (spec.kind === 'rsa') {
-		const pair = await generateKeyPair('rsa', { modulusLength: spec.modulusLength });
-		return { kid, kty: 'RSA', alg: spec.alg, ...exportPair(pair, kid, spec.alg, spec.use) };
+		const pair = await rsaKeyGenAsync(spec.modulusLength);
+		return { kid: pair.secretKey.kid, kty: 'RSA', alg: spec.alg, ...stampPair(pair, spec.alg, spec.use) };
 	}
 	throw new Error('Internal error');
 }
 
-function exportPair(pair, kid, alg, use) {
-	const secretKey = pair.privateKey.export({ format: 'jwk' });
-	const publicKey = pair.publicKey.export({ format: 'jwk' });
+function stampPair(pair, alg, use) {
+	const { secretKey, publicKey } = pair;
 	delete secretKey.key_ops;
 	delete publicKey.key_ops;
 	secretKey.alg = alg;
 	secretKey.use = use;
-	secretKey.kid = kid;
 	publicKey.alg = alg;
 	publicKey.use = use;
-	publicKey.kid = kid;
 	return { secretKey, publicKey };
 }
 
