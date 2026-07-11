@@ -1,6 +1,6 @@
 {
   "name": "tr-key-vault",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "PostgreSQL backed key vault server for JWT/JWE/JWK operations",
   "main": "index.js",
   "bin": {
